@@ -79,7 +79,7 @@ Reserve a stable Pi address, configure private DNS, check subnet overlaps, and d
 
 Choose the permanent hostname before authenticator enrollment: changing the WebAuthn RP ID breaks existing credential bindings. The frontend/enrollment client is not implemented yet, so leave account provisioning for that milestone; a ten-minute enrollment token created now would expire unused.
 
-The overlay is statically validated, but Pi-specific runtime checks require the commands above. Workstation validation does not prove the Pi's networking, storage reliability, or power-loss behavior.
+The user has now imported the ARM64 images, started both containers on the Pi, verified HTTPS on loopback, applied the scoped firewall, and received a verified `{"status":"ok"}` response from the Mac at `https://pi.fritz.box/health` after LAN publication. This confirms the positive LAN/DNS/TLS path. The user also verified the negative source-filter path: a disposable Docker bridge client timed out, and the scoped chain showed three dropped packets (180 bytes) alongside 95 allowed-direction packets. The user confirmed the firewall unit is enabled and active and appears in Docker's loaded `Requires` and `After` properties. Startup dependency configuration is verified, but behavior after an actual reboot remains untested; these checks do not establish storage reliability or power-loss behavior.
 
 ## References
 
@@ -148,7 +148,7 @@ else:
 sudo iptables -vnL PV_PI_HTTPS
 ```
 
-A timeout together with an incremented DROP counter is evidence for the negative path; a timeout alone is not proof. Root-owned host access and deliberate proxying through a trusted LAN device are outside this network restriction. Future VPN source ranges require their own reviewed allowance and verification.
+The user-run probe timed out as expected; the chain then reported three dropped packets (180 bytes) and 95 allowed-direction packets. Together with the successful Mac HTTPS request, this verifies both tested paths. A timeout alone would not prove filtering. Root-owned host access and deliberate proxying through a trusted LAN device are outside this network restriction. Future VPN source ranges require their own reviewed allowance and verification.
 
 ## Firewall maintenance and rollback
 
@@ -163,6 +163,6 @@ sudo systemctl disable --now private-vault-firewall.service
 sudo /usr/local/sbin/private-vault-firewall remove
 ```
 
-The unit deliberately has no `ExecStop`, so stopping it does not remove firewall rules. Removing its Docker requirement before stopping the unit avoids propagating a stop to Docker. Do not flush global tables or delete Docker's `DOCKER-USER` chain. Recheck source policy after firewall-management or Docker backend changes; boot ordering and packet filtering still need live Pi verification.
+The unit deliberately has no `ExecStop`, so stopping it does not remove firewall rules. Removing its Docker requirement before stopping the unit avoids propagating a stop to Docker. Do not flush global tables or delete Docker's `DOCKER-USER` chain. Recheck source policy after firewall-management or Docker backend changes; the loaded startup dependency ordering has been verified (`enabled`, `active`, and Docker `Requires`/`After`). An actual reboot and post-boot network checks remain untested. Schedule that check when interruption of the Pi's other containers is acceptable.
 
 [Docker's documented DOCKER-USER and conntrack matching behavior](https://docs.docker.com/engine/network/firewall-iptables/)

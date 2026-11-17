@@ -196,6 +196,10 @@ Results and observed request latency percentiles go to `.validation/resilience-l
 
 ## Raspberry Pi Staging
 
-For the ARM64 Raspberry Pi 4 running Debian 13, see [deploy/raspberry-pi.md](deploy/raspberry-pi.md). The optional Pi overlay uses workstation-built ARM64 images and starts with loopback-only HTTPS. It preserves the standard container hardening and database volumes. Live Pi verification is pending.
+For the ARM64 Raspberry Pi 4 running Debian 13, see [deploy/raspberry-pi.md](deploy/raspberry-pi.md). The optional Pi overlay uses workstation-built ARM64 images and starts with loopback-only HTTPS. It preserves the standard container hardening and database volumes. The user has verified the running Pi backend over HTTPS from the Mac at `https://pi.fritz.box/health`. The scoped firewall is applied, and a disposable Docker bridge client was blocked with three packets counted by the DROP rule. The firewall unit is enabled/active and Docker's loaded Requires/After ordering is verified. Actual reboot persistence remains untested.
 
-The Pi LAN firewall profile and its systemd startup dependency are documented in [deploy/raspberry-pi.md](deploy/raspberry-pi.md). Shell/state-model tests pass, but the installer and real allow/drop behavior still require Pi verification before publishing LAN HTTPS.
+The Pi LAN firewall profile and its systemd startup dependency are documented in [deploy/raspberry-pi.md](deploy/raspberry-pi.md). Shell/state-model tests and the user-run LAN allow/drop checks pass; reboot verification remains pending.
+
+## Mac Backup Collection
+
+See [deploy/mac-backups.md](deploy/mac-backups.md) for hourly encrypted pulls, a restricted Pi SSH export account, pinned host keys, and checks for backups older than 24 hours. Scheduling requires a successful manual collection first. All 38 Python tests pass locally, including 11 collector setup and monitoring tests. Live SSH export, launchd execution, and notification delivery remain unverified until device installation. A sleeping or offline Mac does not provide continuous monitoring.
