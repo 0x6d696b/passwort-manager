@@ -36,6 +36,7 @@ pub struct AppState {
     webauthn: Webauthn,
     requests: Mutex<VecDeque<Instant>>,
     slots: Semaphore,
+    health_slots: Semaphore,
 }
 impl AppState {
     pub fn new(config: Config, pool: SqlitePool) -> anyhow::Result<Arc<Self>> {
@@ -53,6 +54,7 @@ impl AppState {
             memory: Mutex::new(Memory::default()),
             requests: Mutex::new(VecDeque::new()),
             slots: Semaphore::new(32),
+            health_slots: Semaphore::new(2),
         }))
     }
 }
@@ -145,7 +147,14 @@ async fn boundary(State(state): State<Arc<AppState>>, request: Request, next: Ne
         {
             return Err(ApiError::forbidden());
         }
-        let _permit = state.slots.try_acquire().map_err(|_| ApiError::busy())?;
+        // Health has a small independent budget so stalled database requests cannot
+        // consume all liveness capacity. Health still passes Host/Origin validation.
+        let slots = if request.uri().path() == "/health" {
+            &state.health_slots
+        } else {
+            &state.slots
+        };
+        let _permit = slots.try_acquire().map_err(|_| ApiError::busy())?;
         if request.uri().path() != "/health" {
             let mut requests = state.requests.lock().await;
             while requests

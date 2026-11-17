@@ -43,4 +43,4 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes age
       - name: Encrypted backup and disposable container recovery
-        run: python3 scripts/validate_containers.py --recovery
+        run: python3 scripts/validate_containers.py --recovery --resilience

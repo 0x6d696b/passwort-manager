@@ -110,6 +110,7 @@ def main():
     parser.add_argument("--runtime-image", default="debian:bookworm-slim")
     parser.add_argument("--caddy-image", default="caddy:2")
     parser.add_argument("--recovery", action="store_true", help="also validate age-encrypted backup and disaster recovery")
+    parser.add_argument("--resilience", action="store_true", help="also run bounded HTTPS load and forced API termination checks")
     args = parser.parse_args()
     if args.recovery:
         from recovery_validation import prerequisites
@@ -118,7 +119,7 @@ def main():
     command(["docker", "info"], capture=True)
     command(["python3", "scripts/verify_vendor.py"])
     os.umask(0o077)
-    report = {"started_at": datetime.now(timezone.utc).isoformat(), "checks": [], "passed": False, "recovery": args.recovery}
+    report = {"started_at": datetime.now(timezone.utc).isoformat(), "checks": [], "passed": False, "recovery": args.recovery, "resilience": args.resilience}
     project = "vault-validation-" + uuid.uuid4().hex[:12]
     report["project"] = project
     if args.recovery:
@@ -228,7 +229,7 @@ assert os.getuid() == 10001
 """
             run("exec", "-T", "api", "python3", "-c", permissions)
             passed("database and enrollment file ownership and permissions")
-            if args.recovery:
+            if args.recovery or args.resilience:
                 from recovery_validation import SEED_FIXTURE
                 run("exec", "-T", "api", "python3", "-c", SEED_FIXTURE)
                 passed("synthetic vault entries and a deletion tombstone prepared")
@@ -247,6 +248,9 @@ assert os.getuid() == 10001
                 restored_status, _, _ = request(port, context, "/api/v1/vault")
                 require(restored_status == 401, "restored vault allows unauthenticated access")
                 passed("restored API serves trusted HTTPS and still requires authentication")
+            if args.resilience:
+                from runtime_resilience import exercise
+                report["load"] = exercise(run, port, context, request, lambda: eventually(healthy), temporary, passed)
             run("restart", "api")
             eventually(healthy)
             passed("API restarts and reopens existing persistent database")
@@ -287,6 +291,8 @@ assert os.getuid() == 10001
             report["finished_at"] = datetime.now(timezone.utc).isoformat()
             results = ROOT / ".validation"
             results.mkdir(mode=0o700, exist_ok=True)
+            if args.resilience:
+                (results / "resilience-latest.json").write_text(json.dumps(report, indent=2) + "\n")
             if args.recovery:
                 (results / "recovery-latest.json").write_text(json.dumps(report, indent=2) + "\n")
             (results / "containers-latest.json").write_text(json.dumps(report, indent=2) + "\n")

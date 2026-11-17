@@ -6,7 +6,7 @@ Rust API for a single-user, private-network password manager. The server stores 
 
 Implemented in source: WebAuthn enrollment/login, credential management, hashed in-memory sessions, CSRF/origin checks, owner-scoped encrypted CRUD, revision conflicts, deletion tombstones, transactional audit events, local account recovery, migrations, and independent snapshot/checkpoint tooling.
 
-**Verified with the patched dependency graph and Rust 1.100:** formatting, Clippy with warnings denied, all 16 Rust tests, all 19 Python tests, the optimized release build, source-integrity checks, and Compose static validation pass. The otherwise-disabled MySQL adapter compiles when explicitly enabled for verification. The patched release binary also passed migration, enrollment/recovery, owner-only permission, hashed enrollment-token, audit persistence, database integrity, and exclusive-lock smoke checks.
+**Verified with the patched dependency graph and Rust 1.100:** formatting, Clippy with warnings denied, all 27 Rust test executions (including the subprocess fixture entry point), all 22 Python tests, the optimized release build, source-integrity checks, and Compose static validation pass. The otherwise-disabled MySQL adapter compiles when explicitly enabled for verification. The patched release binary also passed migration, enrollment/recovery, owner-only permission, hashed enrollment-token, audit persistence, database integrity, and exclusive-lock smoke checks.
 
 **Audit:** `Cargo.lock` resolves patched `libsqlite3-sys` 0.39.1 and stable RSA 0.10.0. The cached RustSec audit reports **zero vulnerabilities**, with the unused optional chrono maintenance warning still visible and no advisory exclusions. See [vendor/README.md](vendor/README.md) for the compatibility patches, provenance, and maintenance requirements. Refreshing advisories and checking yanked status still need network access.
 
@@ -81,7 +81,7 @@ Create a vault using a client-generated UUID, `expected_revision: 0`, and an `en
 
 Allowed memory profiles are 65536, 131072, and 262144 KiB. The backend validates the format; it cannot authenticate ciphertext without the client key. Entry PUT bodies contain `expected_revision`, `ciphertext` (16–65536 decoded bytes), and `nonce` (24 decoded bytes). DELETE bodies contain `expected_revision`. Use the returned revision for subsequent writes; a stale revision returns 409. Vault `sequence` tracks all vault mutations, while vault `revision` tracks envelope changes/deletion. Paginated reads are not a consistent synchronization snapshot; clients must recheck the vault sequence and repeat if it changes.
 
-Unknown fields are rejected in vault payloads. Initial bounds: 256 KiB requests, 100 entries per page, 10000 entries including tombstones, 64 MiB encoded entry content, 32 active requests/sessions/ceremonies, 240 requests/minute, and 20 authentication operations/minute. The global rate limits are intentional for one user. Entry tombstones cannot be resurrected; deleting the whole vault is terminal in this initial version. Backups may still contain deleted ciphertext.
+Unknown fields are rejected in vault payloads. Initial bounds: 256 KiB requests, 100 entries per page, 10000 entries including tombstones, 64 MiB encoded entry content, 32 active API requests, two reserved health requests, 32 sessions/ceremonies, 240 requests/minute, and 20 authentication operations/minute. The global rate limits are intentional for one user. Entry tombstones cannot be resurrected; deleting the whole vault is terminal in this initial version. Backups may still contain deleted ciphertext.
 
 ## Containers
 
@@ -171,3 +171,29 @@ The drill then stops and removes its original API container, verifies the source
 The November 17, 2026 user-run drill passed all 18 checks, including source-volume removal and fresh-volume recovery; the agent inspected the report. Results go to `.validation/recovery-latest.json` as well as the container validation report. Disposable keys and plaintext candidates are removed with the temporary directory; neither keys nor record payloads are included in reports. Failure diagnostics are captured before cleanup. Local deletion is cleanup, not a guarantee of forensic erasure.
 
 This verifies recovery of the backend's encrypted vault data. The future client still needs its vault master password or a separately designed vault recovery mechanism to decrypt entries. The drill does not enroll or exercise a real authenticator, prove session revocation with an existing browser session, or physically separate the collector/key hosts. For production, keep the private recovery identity offline and retain trusted checkpoints independently of the application host.
+
+## Failure and Load Verification
+
+Run the focused fault-injection suite with:
+
+```sh
+cargo test --locked --test resilience
+```
+
+The local suite passes with real SQLite errors and temporary databases: `SQLITE_FULL` using a page-count limit, read-only storage, writer-lock contention, exhausted audit capacity, cancellation with a live transaction, the ten-second request deadline, 64-way revision races, rate exhaustion, and API saturation. It checks unchanged revisions/audit state after failed writes, successful writes after recoverable faults, database integrity, and continued authorization. A subprocess commits one entry, spills more than 1 MiB of uncommitted WAL, and is forcibly killed; reopening preserves only the commit and can accept new writes. The fixture entry-point test is called by that subprocess and is not an independent test scenario.
+
+These tests identified and fixed two behaviors: unavailable SQLite storage now returns a generic 503 without exposing database messages, and `/health` has two reserved request slots independent of the 32 API slots. Health is process liveness, not a declaration that storage is writable.
+
+For the disposable Docker/HTTPS drill, run:
+
+```sh
+python3 scripts/validate_containers.py --resilience
+```
+
+Add `--recovery` to combine it with the encrypted recovery drill, as CI does. The load phase sends 300 anonymous protected-endpoint requests with concurrency 16 while checking health, requires throttling and no successful access, checks origin rejection, and compares complete persistent state before/after. It then SIGKILLs only its disposable API container and verifies restart, authentication, and unchanged committed data. It does not test authenticated HTTPS writes; those races are exercised through the Rust API/router tests.
+
+Results and observed request latency percentiles go to `.validation/resilience-latest.json`; they are observations for the test machine, not a production throughput guarantee. The November 17, 2026 user-run combined drill passed all 21 checks and cleanup succeeded. Of 300 anonymous requests at concurrency 16, 239 returned 401 and 61 returned 429; none gained access. Health stayed reachable, state was unchanged after overload and SIGKILL/restart, and encrypted recovery passed. The observed p95 request time was 11.9 ms for this particular anonymous-request sample; this does not measure authenticated vault throughput. The agent inspected `.validation/resilience-latest.json`. The local suite does not fill the host disk, simulate power loss or hardware failure, or prove performance during a sustained distributed attack. Reserve health capacity in the API cannot guarantee responsiveness if the host or reverse proxy itself is exhausted.
+
+## Raspberry Pi Staging
+
+For the ARM64 Raspberry Pi 4 running Debian 13, see [deploy/raspberry-pi.md](deploy/raspberry-pi.md). The optional Pi overlay uses workstation-built ARM64 images and starts with loopback-only HTTPS. It preserves the standard container hardening and database volumes. Live Pi verification is pending.

@@ -1,6 +1,6 @@
 # Backend Architecture
 
-This document describes the target design. An initial implementation now exists in `src/`, `migrations/`, and `scripts/`. The patched Rust build, Clippy, all 16 Rust tests, and all 19 Python tests pass with Rust 1.100. Temporary dependency backports resolve patched SQLite and RSA with zero cached-audit vulnerability findings; an unused chrono maintenance warning remains visible (see README.md and vendor/README.md). The user-run isolated Docker validation passed all ten startup, HTTPS, hardening, permission, snapshot, and restart checks on November 17, 2026; the subsequent encrypted disaster-recovery drill passed all 18 checks, including loss of the source volume, recovery into a fresh volume, and tampering rejection. Production network and operational verification remain separate. It targets a single-user private-network deployment. Rust, Axum, Tokio, SQLx, and SQLite remain the application stack. The revision strengthens authentication, authorization, durability, and independent monitoring. Client implementation and client compromise are outside this document's scope.
+This document describes the target design. An initial implementation now exists in `src/`, `migrations/`, and `scripts/`. The patched Rust build, Clippy, all 27 Rust test executions (one is a subprocess fixture entry point), and all 22 Python tests pass with Rust 1.100. Temporary dependency backports resolve patched SQLite and RSA with zero cached-audit vulnerability findings; an unused chrono maintenance warning remains visible (see README.md and vendor/README.md). The user-run isolated Docker validation passed all ten startup, HTTPS, hardening, permission, snapshot, and restart checks on November 17, 2026; the subsequent encrypted disaster-recovery drill passed all 18 checks, including loss of the source volume, recovery into a fresh volume, and tampering rejection. Production network and operational verification remain separate. It targets a single-user private-network deployment. Rust, Axum, Tokio, SQLx, and SQLite remain the application stack. The revision strengthens authentication, authorization, durability, and independent monitoring. Client implementation and client compromise are outside this document's scope.
 
 ## Security Goals and Trust Boundaries
 
@@ -112,7 +112,7 @@ Before reopening a restored service, an operator uses `scripts/verify_restore.py
 
 ## Availability and Operational Controls
 
-- Start with 256 KiB mutation bodies, 100-entry pages, 32 active API requests, bounded queues, database busy timeouts, and an explicit vault storage quota. Tune through measurements.
+- Start with 256 KiB mutation bodies, 100-entry pages, 32 active API requests with two separate health slots, bounded queues, database busy timeouts, and an explicit vault storage quota. Tune through measurements.
 - Throttle authentication by source and account, with global caps and temporary backoff. Trust forwarding headers only from Caddy; avoid permanent lockouts that attackers can trigger.
 - Enforce limits at both proxy and application boundaries. Reject oversized input before expensive parsing. Reserve capacity for health checks and shutdown.
 - Fail startup on invalid configuration, missing migrations, or unsafe production settings. Apply migrations through a separate maintenance command after a verified backup.
@@ -136,3 +136,7 @@ These are implementation gates, not evidence that tests already passed:
 
 - [W3C Web Authentication](https://www.w3.org/TR/webauthn-3/): server-side registration and assertion verification.
 - [SQLite Online Backup API](https://www.sqlite.org/backup.html): consistent backups of a live database.
+
+## Resilience Verification Status
+
+Local fault-injection tests now pass for SQLite capacity exhaustion, read-only mode, write-lock contention, audit capacity, cancelled transactions, request deadlines, concurrent updates, and process termination after uncommitted WAL spill. Unavailable storage returns 503; protected operations remain authenticated and failed mutations do not advance revisions or audit state. A separate two-slot liveness budget keeps health independent of stalled API work. The November 17, 2026 user-run combined Docker drill passed all 21 checks: 300 anonymous HTTPS requests yielded 239 unauthorized and 61 rate-limited responses; health remained reachable, committed state survived SIGKILL/restart, encrypted recovery passed, and cleanup succeeded. The agent inspected the report. See README.md for commands and the limits of these tests.

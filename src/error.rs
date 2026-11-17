@@ -45,6 +45,10 @@ impl From<sqlx::Error> for ApiError {
         // Never emit SQL, bound values, or database paths to logs/responses.
         match &error {
             sqlx::Error::Database(e) if e.is_unique_violation() => Self::conflict(),
+            sqlx::Error::Database(e) if sqlite_storage_unavailable(e.as_ref()) => {
+                tracing::warn!("database storage unavailable");
+                Self::busy()
+            }
             sqlx::Error::PoolTimedOut => Self::busy(),
             _ => {
                 tracing::error!("database operation failed");
@@ -57,4 +61,16 @@ impl From<serde_json::Error> for ApiError {
     fn from(_: serde_json::Error) -> Self {
         Self::internal()
     }
+}
+
+fn sqlite_storage_unavailable(error: &dyn sqlx::error::DatabaseError) -> bool {
+    // SQLite extended codes retain the primary result in their lowest eight bits.
+    // Never expose database messages (which can contain SQL/values) to clients.
+    matches!(
+        error
+            .code()
+            .and_then(|code| code.parse::<i32>().ok())
+            .map(|code| code & 0xff),
+        Some(5 | 6 | 8 | 10 | 13) // BUSY, LOCKED, READONLY, IOERR, FULL
+    )
 }
