@@ -6,7 +6,7 @@ Rust API for a single-user, private-network password manager. The server stores 
 
 Implemented in source: WebAuthn enrollment/login, credential management, hashed in-memory sessions, CSRF/origin checks, owner-scoped encrypted CRUD, revision conflicts, deletion tombstones, transactional audit events, local account recovery, migrations, and independent snapshot/checkpoint tooling.
 
-**Verified with the patched dependency graph and Rust 1.100:** formatting, Clippy with warnings denied, all 27 Rust test executions (including the subprocess fixture entry point), all 22 Python tests, the optimized release build, source-integrity checks, and Compose static validation pass. The otherwise-disabled MySQL adapter compiles when explicitly enabled for verification. The patched release binary also passed migration, enrollment/recovery, owner-only permission, hashed enrollment-token, audit persistence, database integrity, and exclusive-lock smoke checks.
+**Verified with the patched dependency graph and Rust 1.100:** formatting, Clippy with warnings denied, all 27 Rust test executions (including the subprocess fixture entry point), all 27 Python tests, the optimized release build, source-integrity checks, and Compose static validation pass. The otherwise-disabled MySQL adapter compiles when explicitly enabled for verification. The patched release binary also passed migration, enrollment/recovery, owner-only permission, hashed enrollment-token, audit persistence, database integrity, and exclusive-lock smoke checks.
 
 **Audit:** `Cargo.lock` resolves patched `libsqlite3-sys` 0.39.1 and stable RSA 0.10.0. The cached RustSec audit reports **zero vulnerabilities**, with the unused optional chrono maintenance warning still visible and no advisory exclusions. See [vendor/README.md](vendor/README.md) for the compatibility patches, provenance, and maintenance requirements. Refreshing advisories and checking yanked status still need network access.
 
@@ -197,3 +197,5 @@ Results and observed request latency percentiles go to `.validation/resilience-l
 ## Raspberry Pi Staging
 
 For the ARM64 Raspberry Pi 4 running Debian 13, see [deploy/raspberry-pi.md](deploy/raspberry-pi.md). The optional Pi overlay uses workstation-built ARM64 images and starts with loopback-only HTTPS. It preserves the standard container hardening and database volumes. Live Pi verification is pending.
+
+The Pi LAN firewall profile and its systemd startup dependency are documented in [deploy/raspberry-pi.md](deploy/raspberry-pi.md). Shell/state-model tests pass, but the installer and real allow/drop behavior still require Pi verification before publishing LAN HTTPS.

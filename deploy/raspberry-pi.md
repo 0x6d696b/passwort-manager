@@ -86,3 +86,83 @@ The overlay is statically validated, but Pi-specific runtime checks require the 
 - [Docker multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
 - [Docker image export](https://docs.docker.com/reference/cli/docker/image/save/)
 - [Docker image import](https://docs.docker.com/reference/cli/docker/image/load/)
+
+## 6. Install the scoped LAN firewall before publishing HTTPS
+
+The inspected Pi uses Docker's iptables-nft backend, with an empty `DOCKER-USER` chain. Do not edit the nftables tables marked as managed by iptables. The supplied host profile is specific to `eth0`, `192.168.178.33`, and trusted source subnet `192.168.178.0/24`.
+
+Sync the updated deployment files to the Pi, then, from the repository root:
+
+```sh
+sudo iptables-save > /tmp/private-vault-iptables-before.txt
+sudo sh deploy/install-pi-firewall.sh
+sudo systemctl status private-vault-firewall.service --no-pager
+sudo iptables -S DOCKER-USER
+sudo iptables -S PV_PI_HTTPS
+```
+
+The installer applies the policy now and installs a systemd prerequisite for future Docker starts. It does not restart Docker or existing containers. On future boots **Docker will not start if this firewall unit fails**, which also affects the availability of the Pi's other Docker services. This is deliberate fail-closed startup ordering. Review the installed profile before running the installer.
+
+The hook matches the connection's original destination `192.168.178.33:443`, rather than the changing container address or translated port 8443. Only that IPv4/TCP service is restricted. Original-direction traffic entering `eth0` from `192.168.178.0/24` returns to Docker's existing policy; other sources to that tuple are dropped. Reply-direction packets are not matched. SSH INPUT rules and the existing published ports 53, 8080, and 8082 are not modified. No IPv6 HTTPS publication is configured.
+
+The script flushes only its own `PV_PI_HTTPS` chain and preserves other firewall rules. A temporary tuple-scoped DROP guard stays installed if a policy update fails. Reapplication is idempotent. Root-owned installed scripts and units, not the repository directory, are executed at boot. Do not change this rule with native `nft` commands or save/restore all of Docker's dynamic rules as a persistence mechanism.
+
+## 7. Publish only the Pi LAN address and verify from the Mac
+
+Once the firewall unit is active and its rules are verified, set this in the Pi's `.env.pi`:
+
+```dotenv
+VAULT_HOST=pi.fritz.box
+VAULT_LAN_IP=192.168.178.33
+```
+
+Recreate only the proxy using the previously defined `vault_pi` function (or the full Compose command from section 3):
+
+```sh
+vault_pi up --detach --no-build --pull never proxy
+vault_pi ps
+```
+
+Expect `192.168.178.33:443->8443/tcp`, with no IPv6 or wildcard publication. Copy the already-exported **public** root certificate to the Mac over SSH:
+
+```sh
+scp YOUR_PI_USER@192.168.178.33:/tmp/private-vault-root.crt /tmp/private-vault-pi-root.crt
+curl --fail --cacert /tmp/private-vault-pi-root.crt https://pi.fritz.box/health
+```
+
+Replace `YOUR_PI_USER` with your SSH account. Expect `{"status":"ok"}`. This checks the Mac's default DNS, real LAN routing, hostname, and HTTPS trust. Do not create router port forwards, enable automatic port sharing for the Pi, or bypass TLS verification. The rule trusts the specified LAN; it cannot identify an internet client that another trusted device deliberately proxies or source-NATs into that LAN.
+
+After the positive LAN check, this optional probe on the Pi uses a disposable untrusted-side Docker client without mounting data:
+
+```sh
+docker run --rm --network bridge --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --entrypoint python3 private-vault-api:pi-staging -c '
+import socket
+try:
+    connection = socket.create_connection(("192.168.178.33", 443), timeout=3)
+except TimeoutError:
+    print("Connection dropped as expected")
+else:
+    connection.close()
+    raise SystemExit("FAIL: untrusted Docker client reached HTTPS")'
+sudo iptables -vnL PV_PI_HTTPS
+```
+
+A timeout together with an incremented DROP counter is evidence for the negative path; a timeout alone is not proof. Root-owned host access and deliberate proxying through a trusted LAN device are outside this network restriction. Future VPN source ranges require their own reviewed allowance and verification.
+
+## Firewall maintenance and rollback
+
+Use `sudo systemctl reload private-vault-firewall.service` to reapply a changed installed profile without restarting Docker. Keep the firewall unit active while LAN HTTPS is published.
+
+For rollback, first change `VAULT_LAN_IP` back to `127.0.0.1` and recreate the proxy. Then remove only our systemd drop-in and rules:
+
+```sh
+sudo rm /etc/systemd/system/docker.service.d/private-vault-firewall.conf
+sudo systemctl daemon-reload
+sudo systemctl disable --now private-vault-firewall.service
+sudo /usr/local/sbin/private-vault-firewall remove
+```
+
+The unit deliberately has no `ExecStop`, so stopping it does not remove firewall rules. Removing its Docker requirement before stopping the unit avoids propagating a stop to Docker. Do not flush global tables or delete Docker's `DOCKER-USER` chain. Recheck source policy after firewall-management or Docker backend changes; boot ordering and packet filtering still need live Pi verification.
+
+[Docker's documented DOCKER-USER and conntrack matching behavior](https://docs.docker.com/engine/network/firewall-iptables/)
